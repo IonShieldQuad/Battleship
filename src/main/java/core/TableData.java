@@ -112,7 +112,7 @@ public class TableData implements Serializable {
         return SIZE;
     }
     
-    public static class CellData {
+    public static class CellData implements Serializable {
         private boolean hasShip;
         private boolean isHit;
         private boolean isBorder;

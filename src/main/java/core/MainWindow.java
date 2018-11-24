@@ -2,12 +2,15 @@ package core;
 
 
 import network.BroadcastListener;
+import network.NetCellData;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -31,12 +34,13 @@ public class MainWindow {
     private TableData data1;
     private TableData data2;
     private boolean editMode;
-    private boolean ourTurn = true;
+    private boolean ourTurn = false;
     
     private BroadcastListener broadcastListener;
     private List<InetAddress> addresses = new ArrayList<>();
     private ServerSocket server;
     private Socket connection;
+    private GameThread gameThread;
     
     private MainWindow() {
         initComponents();
@@ -59,12 +63,10 @@ public class MainWindow {
         broadcastListener = new BroadcastListener(SEARCH_PORT, false, false);
         broadcastListener.setAddressCollection(addresses);
         broadcastListener.addResponseListener(e -> {
-            DefaultTableModel model = (DefaultTableModel) serverList.getModel();
-            for (int i = 0; i < model.getRowCount(); i++) {
-                model.removeRow(i);
-            }
+            DefaultListModel<InetAddress> model = (DefaultListModel<InetAddress>) serverList.getModel();
+            model.clear();
             for (InetAddress address : addresses) {
-                model.addRow(new InetAddress[]{address});
+                model.addElement(address);
             }
         });
         broadcastListener.start();
@@ -83,6 +85,10 @@ public class MainWindow {
                     try {
                         server = new ServerSocket(DATA_PORT);
                         connection = server.accept();
+                        gameThread = new GameThread();
+                        gameThread.start();
+                        broadcastListener.setReceivingRequests(false);
+                        setOurTurn(true);
                         log.append("\nConnected");
                     } catch (IOException e1) {
                         e1.printStackTrace();
@@ -97,12 +103,23 @@ public class MainWindow {
         
         connectButton.addActionListener(e -> {
             try {
-                editMode = false;
-                connect(addresses.get(serverList.getSelectedIndex()));
-                log.append("\nConnected");
+                if (data1.isValid()) {
+                    editMode = false;
+                    new Thread(() -> {
+                        log.append("\nConnecting...");
+                        connect(addresses.get(serverList.getSelectedIndex()));
+                        gameThread = new GameThread();
+                        gameThread.start();
+                        broadcastListener.setReceivingResponses(false);
+                        log.append("\nConnected");
+                    }).start();
+                }
+                else {
+                    log.append("\nFailed to connect: table is not valid");
+                }
             }
             catch (ArrayIndexOutOfBoundsException ex) {
-                log.append("\n Invalid address selected");
+                log.append("\nInvalid address selected");
             }
         });
     }
@@ -110,6 +127,7 @@ public class MainWindow {
     private void connect(InetAddress address) {
         try {
             connection = new Socket(address, DATA_PORT);
+            
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -154,6 +172,7 @@ public class MainWindow {
                 if (editMode) {
                     data1.get(row, col).setHasShip(!data1.get(row, col).hasShip());
                 }
+                table1.repaint();
             }
         });
         table2.addMouseListener(new MouseAdapter() {
@@ -162,11 +181,86 @@ public class MainWindow {
                 int row = table2.rowAtPoint(e.getPoint());
                 int col = table2.columnAtPoint(e.getPoint());
             
-                if (!editMode && ourTurn) {
-                    data2.get(row, col).setIsHit(true);
+                if (!editMode && !data2.get(row, col).isHit() && ourTurn) {
+                    gameThread.send(data2.get(row, col), row, col);
                 }
+                table2.repaint();
             }
         });
+    }
+    
+    public void setOurTurn(boolean value) {
+        ourTurn = value;
+        if (value) {
+            log.append("\nOut turn");
+        }
+        else {
+            log.append("\nOpponent's turn");
+        }
+    }
+    
+    private class GameThread extends Thread {
+        ObjectInputStream in;
+        ObjectOutputStream out;
+        
+        @Override
+        public void run() {
+            try {
+                System.out.println("Game thread started");
+                out = new ObjectOutputStream(connection.getOutputStream());
+                System.out.println("Output stream created");
+                in = new ObjectInputStream(connection.getInputStream());
+                System.out.println("Input stream created");
+                
+                while (true) {
+                    NetCellData data = (NetCellData) in.readObject();
+                    System.out.println("Data received: row " + data.getRow() + " col " + data.getCol());
+                    
+                    if (data.isFeedback()) {
+                        TableData.CellData cell = data2.get(data.getRow(), data.getCol());
+                        cell.setHasShip(data.hasShip());
+                        cell.setIsHit(data.isHit());
+                        if (data.isTransferTurn()) {
+                            setOurTurn(true);
+                        }
+                    }
+                    else {
+                        data1.get(data.getRow(), data.getCol()).setIsHit(true);
+                        if (data.isTransferTurn()) {
+                            if (!data1.get(data.getRow(), data.getCol()).hasShip()) {
+                                setOurTurn(true);
+                            }
+                        }
+                        NetCellData cell = new NetCellData(data1.get(data.getRow(), data.getCol()), true, data1.get(data.getRow(), data.getCol()).hasShip(), data.getRow(), data.getCol());
+                        out.writeObject(cell);
+                    }
+                    
+                    table1.repaint();
+                    table2.repaint();
+                    
+                    if (Thread.interrupted()) {
+                        throw new InterruptedException();
+                    }
+                }
+            } catch (IOException | ClassNotFoundException e) {
+                e.printStackTrace();
+            } catch (InterruptedException ignored) {
+            }
+        }
+        
+        public void send(TableData.CellData cell, int row, int col) {
+            try {
+                if (out == null) {
+                    log.append("\nError: output stream is null");
+                    return;
+                }
+                setOurTurn(false);
+                NetCellData c = new NetCellData(cell, false, true, row, col);
+                out.writeObject(c);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
     
     

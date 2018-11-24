@@ -30,7 +30,7 @@ public class BroadcastListener extends Thread {
     @Override
     public void run() {
         try {
-            DatagramSocket socket = new DatagramSocket(port);
+            DatagramSocket socket = new DatagramSocket(port, InetAddress.getByName("0.0.0.0"));
             socket.setBroadcast(true);
             
             while (true) {
@@ -44,12 +44,15 @@ public class BroadcastListener extends Thread {
                 socket.receive(packet);
                 
                 String message = new String(packet.getData()).trim();
+                System.out.println("Message received: " + message);
                 
                 if (receivingRequests && message.equals(REQUEST_MESSAGE)) {
                     byte[] sendData = RESPONSE_MESSAGE.getBytes();
     
-                    DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, packet.getAddress(), packet.getPort());
+                    DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, packet.getAddress(), port);
                     socket.send(sendPacket);
+                    
+                    System.out.println("Response sent");
                     
                     requestListeners.forEach(l -> l.accept(packet));
                 }
@@ -58,6 +61,9 @@ public class BroadcastListener extends Thread {
                     if (addressCollection != null) {
                         addressCollection.add(packet.getAddress());
                     }
+    
+                    System.out.println("Address added");
+                    
                     responseListeners.forEach(l -> l.accept(packet));
                 }
                 
@@ -98,6 +104,8 @@ public class BroadcastListener extends Thread {
                     socket.send(sendPacket);
                 }
             }
+            
+            socket.close();
             
         } catch (IOException e) {
             e.printStackTrace();
