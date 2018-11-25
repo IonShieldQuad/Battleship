@@ -6,6 +6,7 @@ import network.NetCellData;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
@@ -15,7 +16,9 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class MainWindow {
     private static final int SEARCH_PORT = 19008;
@@ -30,6 +33,7 @@ public class MainWindow {
     private JButton hostButton;
     private JButton refreshButton;
     private JList<InetAddress> serverList;
+    private JPanel turnIndicator;
     
     private TableData data1;
     private TableData data2;
@@ -62,17 +66,12 @@ public class MainWindow {
         
         broadcastListener = new BroadcastListener(SEARCH_PORT, false, false);
         broadcastListener.setAddressCollection(addresses);
-        broadcastListener.addResponseListener(e -> {
-            DefaultListModel<InetAddress> model = (DefaultListModel<InetAddress>) serverList.getModel();
-            model.clear();
-            for (InetAddress address : addresses) {
-                model.addElement(address);
-            }
-        });
+        broadcastListener.addResponseListener(e -> updateServerList());
         broadcastListener.start();
         
         refreshButton.addActionListener(e -> {
             addresses.clear();
+            updateServerList();
             broadcastListener.setReceivingResponses(true);
             broadcastListener.sendRequest();
         });
@@ -111,6 +110,7 @@ public class MainWindow {
                         gameThread = new GameThread();
                         gameThread.start();
                         broadcastListener.setReceivingResponses(false);
+                        setOurTurn(false);
                         log.append("\nConnected");
                     }).start();
                 }
@@ -122,6 +122,14 @@ public class MainWindow {
                 log.append("\nInvalid address selected");
             }
         });
+    }
+    
+    private void updateServerList() {
+        DefaultListModel<InetAddress> model = (DefaultListModel<InetAddress>) serverList.getModel();
+        model.clear();
+        for (InetAddress address : addresses) {
+            model.addElement(address);
+        }
     }
     
     private void connect(InetAddress address) {
@@ -192,10 +200,10 @@ public class MainWindow {
     public void setOurTurn(boolean value) {
         ourTurn = value;
         if (value) {
-            log.append("\nOut turn");
+            turnIndicator.setBackground(Color.GREEN);
         }
         else {
-            log.append("\nOpponent's turn");
+            turnIndicator.setBackground(Color.RED);
         }
     }
     
@@ -213,6 +221,10 @@ public class MainWindow {
                 System.out.println("Input stream created");
                 
                 while (true) {
+                    if (Thread.interrupted()) {
+                        throw new InterruptedException();
+                    }
+                    
                     NetCellData data = (NetCellData) in.readObject();
                     System.out.println("Data received: row " + data.getRow() + " col " + data.getCol());
                     
@@ -220,6 +232,7 @@ public class MainWindow {
                         TableData.CellData cell = data2.get(data.getRow(), data.getCol());
                         cell.setHasShip(data.hasShip());
                         cell.setIsHit(data.isHit());
+                        log.append("\nOur shot at row " + data.getRow() + " col " + data.getCol() + " : " + (data.hasShip() ? "hit" : "miss"));
                         if (data.isTransferTurn()) {
                             setOurTurn(true);
                         }
@@ -233,14 +246,36 @@ public class MainWindow {
                         }
                         NetCellData cell = new NetCellData(data1.get(data.getRow(), data.getCol()), true, data1.get(data.getRow(), data.getCol()).hasShip(), data.getRow(), data.getCol());
                         out.writeObject(cell);
+    
+                        log.append("\nOpponent's shot at row " + data.getRow() + " col " + data.getCol() + " : " + (data1.get(data.getRow(), data.getCol()).hasShip() ? "hit" : "miss"));
+                        
+                        List<Point> points = data1.getShipTiles(data.getRow(), data.getCol());
+                        if (points.stream().allMatch(p -> data1.get(p.x, p.y).isHit())) {
+                            Set<Point> adjPoints = new HashSet<>();
+                            points.forEach(p -> {
+                                adjPoints.add(new Point(p.x + 1, p.y));
+                                adjPoints.add(new Point(p.x - 1, p.y));
+                                adjPoints.add(new Point(p.x + 1, p.y + 1));
+                                adjPoints.add(new Point(p.x + 1, p.y - 1));
+                                adjPoints.add(new Point(p.x - 1, p.y + 1));
+                                adjPoints.add(new Point(p.x - 1, p.y - 1));
+                                adjPoints.add(new Point(p.x, p.y + 1));
+                                adjPoints.add(new Point(p.x, p.y - 1));
+                            });
+                            adjPoints.forEach(p -> {
+                                data1.get(p.x, p.y).setIsHit(true);
+                                NetCellData nc = new NetCellData(data1.get(p.x, p.y), true, false, p.x, p.y);
+                                try {
+                                    out.writeObject(nc);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+                            });
+                        }
                     }
                     
                     table1.repaint();
                     table2.repaint();
-                    
-                    if (Thread.interrupted()) {
-                        throw new InterruptedException();
-                    }
                 }
             } catch (IOException | ClassNotFoundException e) {
                 e.printStackTrace();

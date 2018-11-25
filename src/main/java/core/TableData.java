@@ -1,5 +1,6 @@
 package core;
 
+import java.awt.*;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -106,6 +107,23 @@ public class TableData implements Serializable {
         }
         
         return true;
+    }
+    
+    public List<Point> getShipTiles(int row, int col) {
+        List<Point> list = new ArrayList<>();
+        getShipTiles(list, row, col);
+        return list;
+    }
+    
+    private void getShipTiles(List<Point> list, int row, int col) {
+        Point p = new Point(row, col);
+        if (get(row, col).hasShip() && !list.contains(p)) {
+            list.add(p);
+            getShipTiles(list, row + 1, col);
+            getShipTiles(list, row - 1, col);
+            getShipTiles(list, row, col + 1);
+            getShipTiles(list, row, col - 1);
+        }
     }
     
     public int size() {
