@@ -2,7 +2,9 @@ package network;
 
 import core.TableData;
 
-public class NetCellData extends TableData.CellData {
+import java.io.Serializable;
+
+public class NetCellData extends TableData.CellData implements Serializable {
     private boolean feedback;
     private boolean transferTurn;
     private int row;

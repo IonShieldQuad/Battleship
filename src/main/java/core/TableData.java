@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-public class TableData implements Serializable {
+public class TableData {
     private static final int SIZE = 10;
     private static final int[] SHIPS = {4, 3, 2, 1};
     
@@ -124,6 +124,14 @@ public class TableData implements Serializable {
             getShipTiles(list, row, col + 1);
             getShipTiles(list, row, col - 1);
         }
+    }
+    
+    public int maxShipTileCount() {
+        int res = 0;
+        for (int i = 0; i < SHIPS.length; i++) {
+            res += SHIPS[i] * (i + 1);
+        }
+        return res;
     }
     
     public int size() {

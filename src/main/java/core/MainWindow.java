@@ -15,6 +15,7 @@ import java.io.ObjectOutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -34,11 +35,13 @@ public class MainWindow {
     private JButton refreshButton;
     private JList<InetAddress> serverList;
     private JPanel turnIndicator;
+    private JButton resetButton;
     
     private TableData data1;
     private TableData data2;
     private boolean editMode;
     private boolean ourTurn = false;
+    private boolean gameEnded = false;
     
     private BroadcastListener broadcastListener;
     private List<InetAddress> addresses = new ArrayList<>();
@@ -58,9 +61,7 @@ public class MainWindow {
     
         editMode = true;
         
-        validateButton.addActionListener(e -> {
-            log.append("\nTable is " + (data1.isValid() ? "valid" : "not valid"));
-        });
+        validateButton.addActionListener(e -> log.append("\nTable is " + (data1.isValid() ? "valid" : "not valid")));
         
         serverList.setModel(new DefaultListModel<>());
         
@@ -69,59 +70,81 @@ public class MainWindow {
         broadcastListener.addResponseListener(e -> updateServerList());
         broadcastListener.start();
         
-        refreshButton.addActionListener(e -> {
-            addresses.clear();
-            updateServerList();
-            broadcastListener.setReceivingResponses(true);
-            broadcastListener.sendRequest();
-        });
+        refreshButton.addActionListener(e -> refresh());
         
-        hostButton.addActionListener(e -> {
+        hostButton.addActionListener(e -> host());
+        
+        connectButton.addActionListener(e -> connect());
+        
+        resetButton.addActionListener(e -> reset());
+        
+        turnIndicator.setBackground(Color.WHITE);
+    }
+    
+    private void refresh() {
+        if (!editMode) {
+            log.append("\nGame is already started");
+            return;
+        }
+        addresses.clear();
+        updateServerList();
+        broadcastListener.setReceivingResponses(true);
+        broadcastListener.sendRequest();
+    }
+    
+    private void host() {
+        if (!editMode) {
+            log.append("\nGame is already started");
+            return;
+        }
+        if (data1.isValid()) {
+            editMode = false;
+            broadcastListener.setReceivingRequests(true);
+            new Thread(() -> {
+                try {
+                    server = new ServerSocket(DATA_PORT);
+                    connection = server.accept();
+                    gameThread = new GameThread();
+                    gameThread.start();
+                    broadcastListener.setReceivingRequests(false);
+                    setOurTurn(true);
+                    log.append("\nConnected");
+                } catch (SocketException ignored) {
+                } catch (IOException e1) {
+                    e1.printStackTrace();
+                }
+            }).start();
+            log.append("\nHosting game...");
+        }
+        else {
+            log.append("\nFailed to host: table is not valid");
+        }
+    }
+    
+    private void connect() {
+        try {
+            if (!editMode) {
+                log.append("\nGame is already started");
+                return;
+            }
             if (data1.isValid()) {
                 editMode = false;
-                broadcastListener.setReceivingRequests(true);
                 new Thread(() -> {
-                    try {
-                        server = new ServerSocket(DATA_PORT);
-                        connection = server.accept();
-                        gameThread = new GameThread();
-                        gameThread.start();
-                        broadcastListener.setReceivingRequests(false);
-                        setOurTurn(true);
-                        log.append("\nConnected");
-                    } catch (IOException e1) {
-                        e1.printStackTrace();
-                    }
+                    connect(addresses.get(serverList.getSelectedIndex()));
+                    gameThread = new GameThread();
+                    gameThread.start();
+                    broadcastListener.setReceivingResponses(false);
+                    setOurTurn(false);
+                    log.append("\nConnected");
                 }).start();
-                log.append("\nHosting game...");
             }
             else {
-                log.append("\nFailed to host: table is not valid");
+                log.append("\nFailed to connect: table is not valid");
             }
-        });
-        
-        connectButton.addActionListener(e -> {
-            try {
-                if (data1.isValid()) {
-                    editMode = false;
-                    new Thread(() -> {
-                        log.append("\nConnecting...");
-                        connect(addresses.get(serverList.getSelectedIndex()));
-                        gameThread = new GameThread();
-                        gameThread.start();
-                        broadcastListener.setReceivingResponses(false);
-                        setOurTurn(false);
-                        log.append("\nConnected");
-                    }).start();
-                }
-                else {
-                    log.append("\nFailed to connect: table is not valid");
-                }
-            }
-            catch (ArrayIndexOutOfBoundsException ex) {
-                log.append("\nInvalid address selected");
-            }
-        });
+        }
+        catch (ArrayIndexOutOfBoundsException ex) {
+            log.append("\nInvalid address selected");
+        }
     }
     
     private void updateServerList() {
@@ -189,12 +212,54 @@ public class MainWindow {
                 int row = table2.rowAtPoint(e.getPoint());
                 int col = table2.columnAtPoint(e.getPoint());
             
-                if (!editMode && !data2.get(row, col).isHit() && ourTurn) {
+                if (!editMode && !gameEnded && !data2.get(row, col).isHit() && ourTurn) {
                     gameThread.send(data2.get(row, col), row, col);
                 }
                 table2.repaint();
             }
         });
+    }
+    
+    private void reset() {
+        try {
+            if (connection != null) {
+                connection.close();
+            }
+            connection = null;
+            if (server != null) {
+                server.close();
+            }
+            server = null;
+            broadcastListener.setReceivingRequests(false);
+            broadcastListener.setReceivingResponses(false);
+            if (gameThread != null) {
+                gameThread.interrupt();
+            }
+            gameThread = null;
+            editMode = true;
+            ourTurn = false;
+            gameEnded = false;
+            addresses.clear();
+            for (int i = 0; i < data1.size(); i++) {
+                for (int j = 0; j < data1.size(); j++) {
+                    data1.get(i, j).setIsHit(false);
+                    data1.get(i, j).setHasShip(false);
+                }
+            }
+            for (int i = 0; i < data2.size(); i++) {
+                for (int j = 0; j < data2.size(); j++) {
+                    data2.get(i, j).setIsHit(false);
+                    data2.get(i, j).setHasShip(false);
+                }
+            }
+            table1.repaint();
+            table2.repaint();
+            updateServerList();
+            turnIndicator.setBackground(Color.WHITE);
+            log.setText("");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
     
     public void setOurTurn(boolean value) {
@@ -204,6 +269,24 @@ public class MainWindow {
         }
         else {
             turnIndicator.setBackground(Color.RED);
+        }
+    }
+    
+    private void win() {
+        turnIndicator.setBackground(Color.ORANGE);
+        gameEnded = true;
+        log.append("\nVICTORY");
+        if (gameThread != null) {
+            gameThread.interrupt();
+        }
+    }
+    
+    private void lose() {
+        turnIndicator.setBackground(Color.BLUE);
+        gameEnded = true;
+        log.append("\nDEFEAT");
+        if (gameThread != null) {
+            gameThread.interrupt();
         }
     }
     
@@ -227,6 +310,10 @@ public class MainWindow {
                     
                     NetCellData data = (NetCellData) in.readObject();
                     System.out.println("Data received: row " + data.getRow() + " col " + data.getCol());
+    
+                    if (Thread.interrupted()) {
+                        throw new InterruptedException();
+                    }
                     
                     if (data.isFeedback()) {
                         TableData.CellData cell = data2.get(data.getRow(), data.getCol());
@@ -272,6 +359,30 @@ public class MainWindow {
                                 }
                             });
                         }
+                    }
+    
+                    int hitShipTiles = 0;
+                    for (int i = 0; i < data1.size(); i++) {
+                        for (int j = 0; j < data1.size(); j++) {
+                            if (data1.get(i, j).hasShip() && data1.get(i, j).isHit()) {
+                                hitShipTiles++;
+                            }
+                        }
+                    }
+                    if (hitShipTiles >= data1.maxShipTileCount()) {
+                        lose();
+                    }
+    
+                    hitShipTiles = 0;
+                    for (int i = 0; i < data2.size(); i++) {
+                        for (int j = 0; j < data2.size(); j++) {
+                            if (data2.get(i, j).hasShip() && data2.get(i, j).isHit()) {
+                                hitShipTiles++;
+                            }
+                        }
+                    }
+                    if (hitShipTiles >= data2.maxShipTileCount()) {
+                        win();
                     }
                     
                     table1.repaint();
