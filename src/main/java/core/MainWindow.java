@@ -127,6 +127,10 @@ public class MainWindow {
                 log.append("\nGame is already started");
                 return;
             }
+            if (serverList.getSelectedIndex() < 0) {
+                log.append("\nInvalid address selected");
+                return;
+            }
             if (data1.isValid()) {
                 editMode = false;
                 new Thread(() -> {
