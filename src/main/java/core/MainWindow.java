@@ -12,10 +12,7 @@ import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketException;
+import java.net.*;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -36,6 +33,7 @@ public class MainWindow {
     private JList<InetAddress> serverList;
     private JPanel turnIndicator;
     private JButton resetButton;
+    private JTextArea rulesBeforeGameClickTextArea;
     
     private TableData data1;
     private TableData data2;
@@ -83,7 +81,7 @@ public class MainWindow {
     
     private void refresh() {
         if (!editMode) {
-            log.append("\nGame is already started");
+            log.append("\nGame has already started");
             return;
         }
         addresses.clear();
@@ -94,7 +92,7 @@ public class MainWindow {
     
     private void host() {
         if (!editMode) {
-            log.append("\nGame is already started");
+            log.append("\nGame has already started");
             return;
         }
         if (data1.isValid()) {
